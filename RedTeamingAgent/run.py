@@ -150,12 +150,16 @@ class RedTeamAgent:
 
 
 async def run(*args, module_run=None, **kwargs):
-    module_run = AgentRunInput(**module_run)
-    module_run.inputs = InputSchema(**module_run["inputs"])
-    agent = RedTeamAgent(module_run.deployment)
+    if module_run is None and args:
+        module_run = args[0]
 
+    module_run = AgentRunInput(**module_run)
+    module_run.inputs = InputSchema(**module_run.inputs)
+
+    agent = RedTeamAgent(module_run.deployment)
     method = getattr(agent, module_run.inputs.tool_name, None)
     return await method(module_run.inputs)
+
 
 
 if __name__ == "__main__":
