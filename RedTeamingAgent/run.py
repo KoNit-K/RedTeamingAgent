@@ -149,12 +149,12 @@ class RedTeamAgent:
         return messages
 
 
-async def run(module_run_dict, *args, **kwargs):
-    module_run = AgentRunInput(**module_run_dict)
-    module_run.inputs = InputSchema(**module_run.inputs)
-    red_team_agent = RedTeamAgent(module_run.deployment)
+async def run(*args, module_run=None, **kwargs):
+    module_run = AgentRunInput(**module_run)
+    module_run.inputs = InputSchema(**module_run["inputs"])
+    agent = RedTeamAgent(module_run.deployment)
 
-    method = getattr(red_team_agent, module_run.inputs.tool_name, None)
+    method = getattr(agent, module_run.inputs.tool_name, None)
     return await method(module_run.inputs)
 
 
