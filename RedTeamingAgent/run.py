@@ -2,6 +2,7 @@
 import os
 import json
 import asyncio
+import sys
 
 from dotenv import load_dotenv
 from naptha_sdk.client.naptha import Naptha
@@ -10,8 +11,12 @@ from naptha_sdk.inference import InferenceClient
 from naptha_sdk.user import sign_consumer_id
 from naptha_sdk.schemas import AgentDeployment, LLMConfig, AgentRunInput
 
+# for local run, remove comment during local run
+# sys.path.insert(0, os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
+
 from RedTeamingAgent.common.Target import Target
 from RedTeamingAgent.schemas import InputSchema, SystemPromptSchema
+from RedTeamingAgent.adv_eva import EvaluatorAgent
 
 load_dotenv()
 
@@ -143,8 +148,28 @@ class RedTeamAgent:
             raise ValueError("Missing `target` for red_teaming.")
 
         target_agent = self.load_target_agent_from_existing(inputs.target)
+        evaluator = EvaluatorAgent()
 
-        messages = await self.run_conversation_loop(target_agent, goal, num_turns=5, base_inputs=inputs)
+        messages = []
+        current_prompt = goal
+        current_agent = self
+
+        for round_num in range(5):
+            response_messages = await current_agent.chat(inputs, override_user_prompt=current_prompt)
+            response = response_messages[-1]["content"]
+            messages.append({
+                "role": "assistant" if current_agent == self else "target_agent",
+                "content": response
+            })
+
+            if current_agent == target_agent:
+                result = evaluator.evaluate_on_topic(inputs.target, response)
+                if result.passed:
+                    messages.append({"role": "system", "content": "--- ✅ Target Achieved! ---"})
+                    break
+
+            current_prompt = response
+            current_agent = target_agent if current_agent == self else self
 
         return messages
 
