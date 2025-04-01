@@ -8,11 +8,10 @@ from naptha_sdk.client.naptha import Naptha
 from naptha_sdk.configs import setup_module_deployment
 from naptha_sdk.inference import InferenceClient
 from naptha_sdk.user import sign_consumer_id
-from naptha_sdk.schemas import AgentDeployment, LLMConfig
+from naptha_sdk.schemas import AgentDeployment, LLMConfig, AgentRunInput
 
-from common.Target import Target
-from schemas import InputSchema, SystemPromptSchema
-from naptha_sdk.schemas import AgentRunInput
+from RedTeamingAgent.common.Target import Target
+from RedTeamingAgent.schemas import InputSchema, SystemPromptSchema
 
 load_dotenv()
 
