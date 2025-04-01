@@ -2,7 +2,7 @@ from typing import Dict, Optional, Union
 from pydantic import BaseModel, Field, field_validator
 from typing import ClassVar
 
-from common.Target import Target
+from RedTeamingAgent.common.Target import Target
 
 
 class ChatInputSchema(BaseModel):
