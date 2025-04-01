@@ -115,7 +115,7 @@ class RedTeamAgent:
         full_result = ""
         previous_score = None
 
-        for i in range(10):
+        for i in range(3):
             if i == 0:
                 attack_prompt = get_attacker_system_prompt(goal, target_topic)
             else:
