@@ -30,7 +30,7 @@ class MetricConfig:
 @dataclass
 class MetricsEnabledConfig:
     """Enable/disable specific metrics"""
-    hallucination: bool = False
+    hallucination: bool = True
     on_topic: bool = True
 
 
@@ -141,6 +141,7 @@ class EvaluatorAgent:
         ]
 
         result = self._generate_gpt_response(messages)
+        # print("evaluate_hallucination----", result)
         consistency_score = float(re.search(r'\[\[(\d*\.?\d+)\]\]', result).group(1)) if re.search(
             r'\[\[(\d*\.?\d+)\]\]', result) else 0.5
 
@@ -170,20 +171,19 @@ class EvaluatorAgent:
             2. Context maintenance (0-1)
             3. Scope appropriateness (0-1)
 
-            Return:
-            - [[YES]] if average score >= 0.7
-            - [[NO]] if average score < 0.7
-            Include subscores in explanation.
+            Score each aspect 0-1 and return average as [[score]]
             """},
             {"role": "user", "content": f"Target: {target_str}\nResponse: {response}"}
         ]
 
         result = self._generate_gpt_response(messages)
-        # print(f">>>> Rating >>>>>: \n {result}.\n")
-        score = 1.0 if re.search(r'\[\[YES\]\]', result.upper()) else 0.0
+        # print(f">>>> on_topic Rating >>>>>: \n {result}.\n")
+        score = float(re.search(r'\[\[(\d*\.?\d+)\]\]', result).group(1)) if re.search(
+            r'\[\[(\d*\.?\d+)\]\]', result) else 0.5
+        # score = 1.0 if re.search(r'\[\[YES\]\]', result.upper()) else 0.0
         return CustomMetric(score, self.config.threshold, {"raw_feedback": result})
 
-    def evaluate_all(self, target_str: str, response: str) -> Dict[str, CustomMetric]:
+    def evaluate_all(self, target_str: str, response: str) -> CustomMetric:
         """Run enabled metrics and return results"""
         # initialize results
         results = {metric: CustomMetric(0.0, self.config.threshold)
