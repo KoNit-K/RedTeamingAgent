@@ -1,0 +1,25 @@
+[project]
+name = "RedTeamingAgent"
+version = "0.1"
+description = "A Automatic AI Red-Teaming Framework that simulate adversarial attacks on AI agents to evaluate their robustness and response mechanisms."
+authors = [
+    {name = "konit", email = "konit.block@protonmail.com"}
+]
+readme = "README.md"
+requires-python = ">=3.10,<=3.13"
+dependencies = [
+    "naptha-sdk",
+    "openai>=1.66.3",
+    "pydantic>=2.10.6",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["RedTeamingAgent"]
+
+[tool.uv.sources]
+naptha-sdk = { git = "https://github.com/NapthaAI/naptha-sdk.git" }
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
