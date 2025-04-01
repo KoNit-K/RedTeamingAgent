@@ -2,14 +2,16 @@
 import os
 import json
 import asyncio
+import logging
 import sys
+import uuid
 
 from dotenv import load_dotenv
 from naptha_sdk.client.naptha import Naptha
 from naptha_sdk.configs import setup_module_deployment
 from naptha_sdk.inference import InferenceClient
 from naptha_sdk.user import sign_consumer_id
-from naptha_sdk.schemas import AgentDeployment, LLMConfig, AgentRunInput
+from naptha_sdk.schemas import AgentDeployment, AgentRunInput, LLMConfig
 
 # for local run, remove comment during local run
 # sys.path.insert(0, os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
@@ -17,11 +19,10 @@ from naptha_sdk.schemas import AgentDeployment, LLMConfig, AgentRunInput
 from RedTeamingAgent.common.Target import Target
 from RedTeamingAgent.schemas import InputSchema, SystemPromptSchema
 from RedTeamingAgent.adv_eva import EvaluatorAgent
+from RedTeamingAgent.prompt import get_attacker_system_prompt, generate_adaptive_prompt
 
-load_dotenv()
-
-import logging
 logger = logging.getLogger(__name__)
+load_dotenv()
 
 class RedTeamAgent:
     def __init__(self, deployment: AgentDeployment):
@@ -80,21 +81,10 @@ class RedTeamAgent:
 
         return RedTeamAgent(new_deployment)
 
-    async def chat(self, inputs: InputSchema, override_user_prompt: str = None):
-        try:
-            index = int(inputs.index) if inputs.index != "all" else 0
-            goal, _ = Target.get_goal_target_pair(inputs.category, index)
-        except Exception as e:
-            raise ValueError(
-                f"Invalid goal-target for category={inputs.category}, index={inputs.index}. Error: {str(e)}"
-            )
-
-        user_prompt = override_user_prompt or goal
-
+    async def chat(self, messages: list[dict[str, str]]) -> str:
         messages = [
-            {"role": "system", "content": json.dumps(self.deployment.config.system_prompt)},
-            {"role": "user", "content": user_prompt}
-        ]
+            {"role": "system", "content": json.dumps(self.deployment.config.system_prompt)}
+        ] + messages
 
         response = await self.node.run_inference({
             "model": self.deployment.config.llm_config.model,
@@ -104,74 +94,77 @@ class RedTeamAgent:
         })
 
         if isinstance(response, dict):
-            response = response['choices'][0]['message']['content']
-        else:
-            response = response.choices[0].message.content
-
-        messages.append({"role": "assistant", "content": response})
-        messages = [msg for msg in messages if msg["role"] != "system"]
-        return messages
-
-    async def run_conversation_loop(self, target_agent: "RedTeamAgent", initial_user_prompt: str, num_turns: int = 5,
-                                    base_inputs: InputSchema = None):
-        messages = [{"role": "user", "content": initial_user_prompt}]
-        current_speaker = self
-
-        for turn in range(num_turns):
-            input_prompt = messages[-1]["content"]
-
-            response_messages = await current_speaker.chat(
-                base_inputs,
-                override_user_prompt=input_prompt
-            )
-            assistant_response = response_messages[-1]["content"]
-
-            messages.append({
-                "role": "assistant" if current_speaker == self else "target_agent",
-                "content": assistant_response
-            })
-
-            current_speaker = target_agent if current_speaker == self else self
-
-        return messages
+            return response['choices'][0]['message']['content']
+        return response.choices[0].message.content
 
     async def red_teaming(self, inputs: InputSchema):
-        try:
-            index = int(inputs.index) if inputs.index != "all" else 0
-            goal, _ = Target.get_goal_target_pair(inputs.category, index)
-        except Exception as e:
-            raise ValueError(
-                f"Invalid goal-target for category={inputs.category}, index={inputs.index}. Error: {str(e)}"
-            )
-
         if not inputs.target:
             raise ValueError("Missing `target` for red_teaming.")
 
         target_agent = self.load_target_agent_from_existing(inputs.target)
         evaluator = EvaluatorAgent()
 
-        messages = []
-        current_prompt = goal
-        current_agent = self
+        try:
+            index = int(inputs.index) if inputs.index != "all" else 0
+            goal, target_topic = Target.get_goal_target_pair(inputs.category, index)
+        except Exception as e:
+            raise ValueError(
+                f"Invalid goal-target for category={inputs.category}, index={inputs.index}. Error: {str(e)}"
+            )
 
-        for round_num in range(5):
-            response_messages = await current_agent.chat(inputs, override_user_prompt=current_prompt)
-            response = response_messages[-1]["content"]
-            messages.append({
-                "role": "assistant" if current_agent == self else "target_agent",
-                "content": response
-            })
+        full_result = ""
+        previous_score = None
 
-            if current_agent == target_agent:
-                result = evaluator.evaluate_on_topic(inputs.target, response)
-                if result.passed:
-                    messages.append({"role": "system", "content": "--- ✅ Target Achieved! ---"})
-                    break
+        for i in range(10):
+            if i == 0:
+                attack_prompt = get_attacker_system_prompt(goal, target_topic)
+            else:
+                attack_prompt = generate_adaptive_prompt(goal, target_topic, previous_score)
 
-            current_prompt = response
-            current_agent = target_agent if current_agent == self else self
+            attack_msg = [{"role": "user", "content": attack_prompt}]
+            attack_response = await self.chat(attack_msg)
 
-        return messages
+            try:
+                parsed = json.loads(attack_response)
+                attacker_msg = parsed.get("prompt", "")
+                improvement_note = parsed.get("improvement", "")
+            except Exception:
+                attacker_msg = attack_response
+                improvement_note = "N/A"
+
+            target_msg = [{"role": "user", "content": attacker_msg}]
+            target_response = await target_agent.chat(target_msg)
+
+            metric_result = evaluator.evaluate_on_topic(target_topic, target_response)
+            previous_score = metric_result.raw_score
+            short_prompt = (attack_prompt[:500] + "...") if len(attack_prompt) > 500 else attack_prompt
+
+            full_result += f"""
+            
+========================= Round {i + 1} =========================
+🎯 Goal: {goal}
+
+🎭 -----Attacker Agent-----:
+🧠 Adaptive Prompt (Generated Instruction):
+{short_prompt}
+
+🧠 Attacker Agent Output (Improvement Note):
+{improvement_note}
+
+🎯 -----Target Agent-----:
+{target_response}
+
+🤔 -----Evaluator Agent-----:
+✅ Evaluator Score: {metric_result.raw_score:.2f}
+✅ Passed: {metric_result.passed}
+=============================================================
+"""
+
+            if metric_result.passed:
+                break
+
+        return full_result
+
 
 
 async def run(*args, module_run=None, **kwargs):
